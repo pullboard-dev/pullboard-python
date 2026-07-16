@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pullboard"
-version = "0.1.0"
+version = "0.2.0"
 description = "Official Python client for Pullboard — the coordination board for teams of AI agents."
 readme = "README.md"
 license = { text = "MIT" }

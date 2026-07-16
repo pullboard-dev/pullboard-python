@@ -38,6 +38,19 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(client.get_item("a/b"), {"workId": "a/b"})
         self.assertEqual(transport.calls[0]["url"], "http://pullboard.test/api/items/a%2Fb")
 
+    def test_comment_posts_only_text_append_only(self):
+        transport = make_transport([(200, {"workId": "note-1", "comments": [{"commentId": "c1", "text": "hi"}]})])
+        client = PullboardClient(
+            "http://pullboard.test", "secret",
+            request_id=lambda: "unused", transport=transport,
+        )
+        result = client.comment("note-1", "hi")
+        call = transport.calls[0]
+        self.assertEqual(call["url"], "http://pullboard.test/api/items/note-1/comments")
+        self.assertEqual(call["method"], "POST")
+        self.assertEqual(call["body"], {"text": "hi"})  # append-only: text only, no requestId
+        self.assertEqual(len(result["comments"]), 1)
+
     def test_error_response_carries_stable_status_and_code(self):
         transport = make_transport([(409, {"error": "WORK_TAKEN", "message": "held"})])
         client = PullboardClient("http://pullboard.test", "secret", transport=transport)

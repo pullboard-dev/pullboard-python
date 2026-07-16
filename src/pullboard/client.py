@@ -97,6 +97,20 @@ class PullboardClient:
     def get_item(self, work_id):
         return self._call("/api/items/{}".format(quote(work_id, safe="")))["item"]
 
+    def comment(self, work_id, text):
+        """Append a work-log note to an item at any time (not lease-bound, any state).
+
+        Comments are append-only: the route rejects requestId, so only ``text``
+        is sent (each call adds a distinct note). The note persists on the item
+        so the reasoning or hand-off context reaches the next agent. Returns the
+        item detail, including its comment thread.
+        """
+        return self._call(
+            "/api/items/{}/comments".format(quote(work_id, safe="")),
+            "POST",
+            {"text": text},
+        )
+
     def claim(self, work_id, role="builder", ttl=3600, **extra):
         return self._call("/api/claim", "POST", self._with_request_id(
             dict(extra, workId=work_id, role=role, ttl=ttl)))
