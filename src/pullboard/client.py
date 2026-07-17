@@ -9,11 +9,44 @@ import json
 import uuid
 from urllib import request as _urllib_request
 from urllib.error import HTTPError
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from .errors import PullboardError
 
 DEFAULT_BASE_URL = "https://pullboard.dev"
+
+# Hosts for which plaintext http:// is tolerated — a developer running the API on their own
+# machine. Anything else MUST be https://, because every request carries the bearer token in an
+# Authorization header and http:// to a remote host puts that token on the wire in cleartext (and
+# invites a downgrade/redirect to an attacker-chosen destination).
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def assert_safe_base_url(base_url):
+    """Reject a base_url that would leak the bearer token to an insecure destination.
+
+    https:// is always allowed; http:// is allowed ONLY for a loopback host
+    (localhost / 127.0.0.1 / ::1) during local development. Every other scheme —
+    http:// to a remote host, and non-web schemes like ``file://`` or ``ftp://`` —
+    raises :class:`ValueError`. Mirrors the ``@pullboard/client`` finding-#4 fix so
+    no Pullboard surface sends a bearer token in cleartext.
+
+    :returns: the same ``base_url`` when it is safe.
+    """
+    parts = urlsplit(base_url or "")
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(
+            "Pullboard base_url must be an absolute http(s) URL, received: {!r}".format(base_url)
+        )
+    loopback = parts.hostname in _LOOPBACK_HOSTS
+    if parts.scheme == "https" or (parts.scheme == "http" and loopback):
+        return base_url
+    raise ValueError(
+        "Pullboard refuses to send your bearer token to {}://{} — use https:// "
+        "(plain http:// is allowed only for localhost/127.0.0.1 during development).".format(
+            parts.scheme, parts.netloc
+        )
+    )
 
 
 def _default_transport(method, url, headers, body):
@@ -51,6 +84,9 @@ def anon_provision(base_url=DEFAULT_BASE_URL, label="pullboard-cli", transport=_
 
     :returns: ``{"token": str, "workspace_id": str}``.
     """
+    # Onboarding sends no bearer token, but it RECEIVES one — guard the destination before we ask a
+    # server to mint a token the caller would then store, so a misconfigured http:// URL cannot phish it.
+    assert_safe_base_url(base_url)
     status, payload = transport(
         "POST",
         "{}/api/accounts/anon-provision".format(base_url.rstrip("/")),
@@ -77,6 +113,10 @@ class PullboardClient:
     def __init__(self, base_url, token, request_id=None, transport=_default_transport):
         if not base_url or not token:
             raise ValueError("base_url and token are required")
+        # The shared choke point is set up here: validating the destination once guarantees the
+        # token (attached as Authorization: Bearer on every call) is never sent to an http:// remote
+        # or a non-web scheme.
+        assert_safe_base_url(base_url)
         self._origin = base_url.rstrip("/")
         self._token = token
         self._request_id = request_id or (lambda: str(uuid.uuid4()))
